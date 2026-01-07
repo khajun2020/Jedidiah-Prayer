@@ -479,9 +479,11 @@ export default function HomePage() {
                             💬 댓글
                           </button>
 
-                          <button onClick={() => toggleAnswered(p.id, p.isAnswered)} className="btn">
-                            {p.isAnswered ? "응답됨 해제" : "응답됨 표시"}
-                          </button>
+                          {isMine && (
+  <button onClick={() => toggleAnswered(p.id, p.isAnswered)} className="btn">
+    {p.isAnswered ? "응답됨 해제" : "응답됨 표시"}
+  </button>
+)}
 
                           {isMine && (
                             <button onClick={() => deletePrayer(p)} className="btn">
@@ -538,9 +540,11 @@ export default function HomePage() {
                                 💬 댓글
                               </button>
 
-                              <button onClick={() => toggleAnswered(p.id, p.isAnswered)} className="btn">
-                                {p.isAnswered ? "응답됨 해제" : "응답됨 표시"}
-                              </button>
+                              {isMine && (
+  <button onClick={() => toggleAnswered(p.id, p.isAnswered)} className="btn">
+    {p.isAnswered ? "응답됨 해제" : "응답됨 표시"}
+  </button>
+)}
 
                               {isMine && (
                                 <button onClick={() => deletePrayer(p)} className="btn">

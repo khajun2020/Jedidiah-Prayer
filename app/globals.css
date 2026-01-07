@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 전체 톤: 연노랑 + 종이 질감 느낌 */
+:root{
+  --bg: #fff4c9;           /* 연노란 바탕 */
+  --card: rgba(255,255,255,.72);
+  --stroke: rgba(20,20,20,.08);
+  --shadow: 0 18px 40px rgba(0,0,0,.08);
+}
+
+body{
+  background: var(--bg);
+  color: #111;
+}
+
+/* 은은한 배경 패턴 */
+body::before{
+  content:"";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(800px 500px at 20% 10%, rgba(255,255,255,.55), transparent 60%),
+    radial-gradient(700px 420px at 85% 20%, rgba(255,255,255,.35), transparent 60%),
+    radial-gradient(900px 600px at 50% 95%, rgba(255,255,255,.30), transparent 55%);
+  opacity: .9;
+}
+
+/* 공통 카드 */
+.card{
+  background: var(--card);
+  border: 1px solid var(--stroke);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  border-radius: 20px;
+}
+
+/* 공통 입력 */
+.input{
+  background: rgba(255,255,255,.9);
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  padding: 12px 14px;
+  outline: none;
+}
+.input:focus{
+  box-shadow: 0 0 0 4px rgba(0,0,0,.08);
+}
+
+/* 공통 버튼 */
+.btn{
+  border-radius: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--stroke);
+  background: rgba(255,255,255,.85);
+  transition: transform .05s ease, background .2s ease, opacity .2s ease;
+}
+.btn:hover{ background: rgba(255,255,255,.98); }
+.btn:active{ transform: translateY(1px); }
+
+.btn-primary{
+  background: #111;
+  color: #fff;
+  border-color: rgba(0,0,0,.25);
+}
+.btn-primary:hover{ opacity: .92; }
+
+/* 뱃지 */
+.badge{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--stroke);
+  background: rgba(255,255,255,.85);
+}
+.badge-success{
+  background: rgba(16,185,129,.15);
+  border-color: rgba(16,185,129,.25);
+  color: rgb(6,95,70);
+}
+
+.card{
+  background:#fff;
+  border:1px solid rgba(0,0,0,.06);
+  border-radius:18px;
+  box-shadow:0 10px 30px rgba(0,0,0,.06);
+}

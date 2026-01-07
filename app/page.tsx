@@ -15,6 +15,7 @@ import {
   updateDoc,
   where,
   setDoc,
+  getDoc,
 } from "firebase/firestore";
 import {
   GoogleAuthProvider,
@@ -57,7 +58,15 @@ type IntercessionItem = {
   isAnonymous?: boolean;
 };
 
-type ViewMode = "all" | "mine" | "byDate" | "intercession" | "weekly";
+type MemberProfile = {
+  uid: string;
+  displayName: string;
+  email?: string;
+  createdAt?: any;
+  updatedAt?: any;
+};
+
+type ViewMode = "all" | "mine" | "byDate" | "intercession" | "weekly" | "members";
 
 /** (1) 댓글 개수 표시용 훅 */
 function useCommentsCount(prayerId: string) {
@@ -70,6 +79,42 @@ function useCommentsCount(prayerId: string) {
   }, [prayerId]);
 
   return count;
+}
+
+function safeName(u: User | null) {
+  return u?.displayName || u?.email || "알 수 없음";
+}
+
+async function ensureUserProfile(u: User) {
+  // users/{uid} 문서가 없으면 만들고, 있으면 갱신(merge)
+  const ref = doc(db, "users", u.uid);
+  const snap = await getDoc(ref);
+  const displayName = safeName(u);
+
+  if (!snap.exists()) {
+    await setDoc(
+      ref,
+      {
+        uid: u.uid,
+        displayName,
+        email: u.email ?? "",
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } else {
+    await setDoc(
+      ref,
+      {
+        uid: u.uid,
+        displayName,
+        email: u.email ?? "",
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  }
 }
 
 export default function HomePage() {
@@ -96,10 +141,10 @@ export default function HomePage() {
   const [content, setContent] = useState("");
 
   // (6) 금주의 기도제목 폼/목록
-const [weeklyMeditation, setWeeklyMeditation] = useState("");
-const [weeklyPersonal, setWeeklyPersonal] = useState("");
-const [weeklyJedidiah, setWeeklyJedidiah] = useState("");
-const [weeklySchool, setWeeklySchool] = useState("");
+  const [weeklyMeditation, setWeeklyMeditation] = useState("");
+  const [weeklyPersonal, setWeeklyPersonal] = useState("");
+  const [weeklyJedidiah, setWeeklyJedidiah] = useState("");
+  const [weeklySchool, setWeeklySchool] = useState("");
   const [weeklyPrayers, setWeeklyPrayers] = useState<WeeklyPrayer[]>([]);
 
   // (5) 중보기도 목록(내가 기도한 목록)
@@ -109,6 +154,12 @@ const [weeklySchool, setWeeklySchool] = useState("");
   const [prayers, setPrayers] = useState<Prayer[]>([]);
   const [openCommentsId, setOpenCommentsId] = useState<string | null>(null);
 
+  // ===== (NEW) 회원별 모아보기 =====
+  const [members, setMembers] = useState<MemberProfile[]>([]);
+  const [selectedMemberUid, setSelectedMemberUid] = useState<string>(""); // ""이면 아직 선택 안 함
+  const [memberPrayers, setMemberPrayers] = useState<Prayer[]>([]);
+  const [membersQuery, setMembersQuery] = useState(""); // 이름 검색
+
   // 표시 이름 로컬 저장(편의)
   useEffect(() => {
     const saved = localStorage.getItem("jedidiah_display_name");
@@ -117,11 +168,20 @@ const [weeklySchool, setWeeklySchool] = useState("");
 
   // Auth 상태 감시
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       setIsLoggedIn(!!u);
       setUserName(u?.displayName || u?.email || "");
       if (!u) setViewMode("all");
+
+      // 로그인 상태면 users/{uid} 문서 자동 생성/갱신
+      if (u) {
+        try {
+          await ensureUserProfile(u);
+        } catch {
+          // users 컬렉션 권한이 막혀있으면 여기서 실패할 수 있음 (rules 확인 필요)
+        }
+      }
     });
     return () => unsub();
   }, []);
@@ -129,10 +189,10 @@ const [weeklySchool, setWeeklySchool] = useState("");
   // ===== (정석) viewMode에 따라 Firestore 쿼리를 "따로" 구독 =====
   // - all / byDate: 전체를 createdAt desc로 구독
   // - mine: where(authorUid==uid) + orderBy(createdAt desc) 구독
-  // - intercession / weekly: 별도 구독(아래 useEffect)
+  // - intercession / weekly / members: 별도 구독
   useEffect(() => {
     if (!isLoggedIn) return;
-    if (viewMode === "intercession" || viewMode === "weekly") return;
+    if (viewMode === "intercession" || viewMode === "weekly" || viewMode === "members") return;
 
     const uid = auth.currentUser?.uid;
     if (viewMode === "mine" && !uid) return;
@@ -172,17 +232,16 @@ const [weeklySchool, setWeeklySchool] = useState("");
     const q = query(collection(db, "weekly_prayers"), orderBy("createdAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
       const items: WeeklyPrayer[] = snap.docs.map((d) => {
-  const data = d.data() as any;
-  return {
-    id: d.id,
-    content: data.content ?? "",
-    authorUid: data.authorUid ?? "",
-    authorName: data.authorName ?? "",
-    createdAt: data.createdAt,
-  };
-});
-setWeeklyPrayers(items);
-
+        const data = d.data() as any;
+        return {
+          id: d.id,
+          content: data.content ?? "",
+          authorUid: data.authorUid ?? "",
+          authorName: data.authorName ?? "",
+          createdAt: data.createdAt,
+        };
+      });
+      setWeeklyPrayers(items);
     });
 
     return () => unsub();
@@ -216,6 +275,107 @@ setWeeklyPrayers(items);
     return () => unsub();
   }, [isLoggedIn, viewMode]);
 
+  // ===== (NEW) members 목록 구독 =====
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    if (viewMode !== "members") return;
+
+    const q = query(collection(db, "users"), orderBy("displayName", "asc"));
+    const unsub = onSnapshot(q, (snap) => {
+      const items: MemberProfile[] = snap.docs.map((d) => {
+        const data = d.data() as any;
+        return {
+          uid: data.uid ?? d.id,
+          displayName: (data.displayName ?? "").toString().trim() || "이름 없음",
+          email: (data.email ?? "").toString(),
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+        };
+      });
+
+      // 혹시 displayName이 비어있으면 뒤로 보내기
+      items.sort((a, b) => {
+        const an = (a.displayName || "").trim();
+        const bn = (b.displayName || "").trim();
+        if (!an) return 1;
+        if (!bn) return -1;
+        return an.localeCompare(bn, "ko");
+      });
+
+      setMembers(items);
+
+      // 최초 진입 시 선택값이 없으면 현재 유저로 자동 선택(원치 않으면 제거 가능)
+      if (!selectedMemberUid) {
+        setSelectedMemberUid(auth.currentUser?.uid || "anonymous");
+      }
+    });
+
+    return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoggedIn, viewMode]);
+
+  // ===== (NEW) 선택된 회원의 개인 기도제목(prayers)만 구독 =====
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    if (viewMode !== "members") return;
+    if (!selectedMemberUid) return;
+
+    // 익명 분류: isAnonymous==true만 모아서 표시
+    if (selectedMemberUid === "anonymous") {
+      const q = query(
+        collection(db, "prayers"),
+        where("isAnonymous", "==", true),
+        orderBy("createdAt", "desc")
+      );
+      const unsub = onSnapshot(q, (snap) => {
+        const items: Prayer[] = snap.docs.map((d) => {
+          const data = d.data() as any;
+          return {
+            id: d.id,
+            date: data.date ?? "",
+            content: data.content ?? "",
+            isAnonymous: !!data.isAnonymous,
+            authorUid: data.authorUid ?? "",
+            authorName: data.authorName ?? "",
+            prayedCount: Number(data.prayedCount ?? 0),
+            isAnswered: !!data.isAnswered,
+            createdAt: data.createdAt,
+          };
+        });
+        setMemberPrayers(items);
+      });
+      return () => unsub();
+    }
+
+    // 회원 선택: 그 사람 글 중에서 "개인 기도제목만" = prayers 컬렉션 + 익명 제외
+    const q = query(
+      collection(db, "prayers"),
+      where("authorUid", "==", selectedMemberUid),
+      where("isAnonymous", "==", false),
+      orderBy("createdAt", "desc")
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      const items: Prayer[] = snap.docs.map((d) => {
+        const data = d.data() as any;
+        return {
+          id: d.id,
+          date: data.date ?? "",
+          content: data.content ?? "",
+          isAnonymous: !!data.isAnonymous,
+          authorUid: data.authorUid ?? "",
+          authorName: data.authorName ?? "",
+          prayedCount: Number(data.prayedCount ?? 0),
+          isAnswered: !!data.isAnswered,
+          createdAt: data.createdAt,
+        };
+      });
+      setMemberPrayers(items);
+    });
+
+    return () => unsub();
+  }, [isLoggedIn, viewMode, selectedMemberUid]);
+
   const prayersCountLabel = useMemo(() => `${prayers.length}개`, [prayers.length]);
 
   // 날짜별 그룹 (byDate에서 사용)
@@ -228,6 +388,18 @@ setWeeklyPrayers(items);
     }
     return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
   }, [prayers]);
+
+  const filteredMembers = useMemo(() => {
+    const q = membersQuery.trim();
+    if (!q) return members;
+    return members.filter((m) => m.displayName.includes(q) || (m.email || "").includes(q));
+  }, [members, membersQuery]);
+
+  const selectedMemberName = useMemo(() => {
+    if (selectedMemberUid === "anonymous") return "익명";
+    const m = members.find((x) => x.uid === selectedMemberUid);
+    return m?.displayName || "회원";
+  }, [members, selectedMemberUid]);
 
   // ===== Auth Actions =====
   async function handleEmailAuth() {
@@ -243,8 +415,15 @@ setWeeklyPrayers(items);
           await updateProfile(cred.user, { displayName: dn });
           localStorage.setItem("jedidiah_display_name", dn);
         }
+        // users 문서 생성/갱신
+        try {
+          await ensureUserProfile(cred.user);
+        } catch {}
       } else {
-        await signInWithEmailAndPassword(auth, e, password);
+        const cred = await signInWithEmailAndPassword(auth, e, password);
+        try {
+          await ensureUserProfile(cred.user);
+        } catch {}
       }
       setPassword("");
     } catch (err: any) {
@@ -255,7 +434,10 @@ setWeeklyPrayers(items);
   async function handleGoogleLogin() {
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      const cred = await signInWithPopup(auth, provider);
+      try {
+        await ensureUserProfile(cred.user);
+      } catch {}
     } catch (err: any) {
       alert(err?.message ?? "Google 로그인 중 오류가 발생했습니다.");
     }
@@ -266,6 +448,8 @@ setWeeklyPrayers(items);
       await signOut(auth);
       setOpenCommentsId(null);
       setMenuOpen(false);
+      setSelectedMemberUid("");
+      setMembersQuery("");
     } catch (err: any) {
       alert(err?.message ?? "로그아웃 중 오류가 발생했습니다.");
     }
@@ -356,45 +540,40 @@ setWeeklyPrayers(items);
   }
 
   // (6) 금주의 기도제목 추가
-// (6) 금주의 기도제목 추가
-async function addWeeklyPrayer() {
-  if (!auth.currentUser) return alert("로그인이 필요합니다.");
+  async function addWeeklyPrayer() {
+    if (!auth.currentUser) return alert("로그인이 필요합니다.");
 
-  const meditation = weeklyMeditation.trim();
-  const personal = weeklyPersonal.trim();
-  const jedidiah = weeklyJedidiah.trim();
-  const school = weeklySchool.trim();
+    const meditation = weeklyMeditation.trim();
+    const personal = weeklyPersonal.trim();
+    const jedidiah = weeklyJedidiah.trim();
+    const school = weeklySchool.trim();
 
-  // 4칸 중 하나도 안 쓰면 막기(원하면 조건 바꿀 수 있음)
-  if (!meditation && !personal && !jedidiah && !school) {
-    return alert("금주의 기도제목 내용을 입력해 주세요.");
+    if (!meditation && !personal && !jedidiah && !school) {
+      return alert("금주의 기도제목 내용을 입력해 주세요.");
+    }
+
+    const formatted =
+      `<말씀 묵상> ${meditation}\n` +
+      `- 개인: ${personal}\n` +
+      `- 여디디야: ${jedidiah}\n` +
+      `- 학교: ${school}`;
+
+    await addDoc(collection(db, "weekly_prayers"), {
+      content: formatted,
+      meditation,
+      personal,
+      jedidiah,
+      school,
+      authorUid: auth.currentUser.uid,
+      authorName: auth.currentUser.displayName ?? auth.currentUser.email ?? "알 수 없음",
+      createdAt: serverTimestamp(),
+    });
+
+    setWeeklyMeditation("");
+    setWeeklyPersonal("");
+    setWeeklyJedidiah("");
+    setWeeklySchool("");
   }
-
-  // 요청하신 자동 포맷
-  const formatted =
-    `<말씀 묵상> ${meditation}\n` +
-    `- 개인: ${personal}\n` +
-    `- 여디디야: ${jedidiah}\n` +
-    `- 학교: ${school}`;
-
-  await addDoc(collection(db, "weekly_prayers"), {
-    content: formatted, // 화면 표시/저장용
-    // (선택) 나중에 수정/검색 편하려고 원본도 같이 저장
-    meditation,
-    personal,
-    jedidiah,
-    school,
-    authorUid: auth.currentUser.uid,
-    authorName: auth.currentUser.displayName ?? auth.currentUser.email ?? "알 수 없음",
-    createdAt: serverTimestamp(),
-  });
-
-  // 입력칸 초기화
-  setWeeklyMeditation("");
-  setWeeklyPersonal("");
-  setWeeklyJedidiah("");
-  setWeeklySchool("");
-}
 
   async function deleteWeeklyPrayer(item: WeeklyPrayer) {
     if (!auth.currentUser) return alert("로그인이 필요합니다.");
@@ -415,6 +594,11 @@ async function addWeeklyPrayer() {
     setViewMode(mode);
     setOpenCommentsId(null);
     setMenuOpen(false);
+
+    if (mode === "members") {
+      // 회원별 화면 진입 시 기본 선택(현재 유저 → 없으면 익명)
+      setSelectedMemberUid(auth.currentUser?.uid || "anonymous");
+    }
   }
 
   // ===== UI: 로그인 화면 =====
@@ -550,6 +734,15 @@ async function addWeeklyPrayer() {
                     날짜별 모아보기
                   </button>
 
+                  {/* (NEW) 회원별 모아보기 */}
+                  <button
+                    className={`w-full text-left btn ${viewMode === "members" ? "btn-primary" : ""}`}
+                    onClick={() => goto("members")}
+                    type="button"
+                  >
+                    회원별 기도제목
+                  </button>
+
                   <div className="my-2 h-px bg-neutral-200" />
 
                   <button
@@ -595,47 +788,46 @@ async function addWeeklyPrayer() {
                   <div className="text-base font-semibold text-neutral-900">금주의 기도제목 작성</div>
 
                   <div className="mt-4 space-y-3">
-  <div>
-    <label className="text-sm text-neutral-700">말씀 묵상</label>
-    <textarea
-      value={weeklyMeditation}
-      onChange={(e) => setWeeklyMeditation(e.target.value)}
-      className="mt-2 w-full input min-h-[90px] resize-none px-4 py-3"
-      placeholder="이번 주 말씀 묵상 내용을 적어 주세요."
-    />
-  </div>
+                    <div>
+                      <label className="text-sm text-neutral-700">말씀 묵상</label>
+                      <textarea
+                        value={weeklyMeditation}
+                        onChange={(e) => setWeeklyMeditation(e.target.value)}
+                        className="mt-2 w-full input min-h-[90px] resize-none px-4 py-3"
+                        placeholder="이번 주 말씀 묵상 내용을 적어 주세요."
+                      />
+                    </div>
 
-  <div>
-    <label className="text-sm text-neutral-700">개인</label>
-    <textarea
-      value={weeklyPersonal}
-      onChange={(e) => setWeeklyPersonal(e.target.value)}
-      className="mt-2 w-full input min-h-[70px] resize-none px-4 py-3"
-      placeholder="개인 기도제목"
-    />
-  </div>
+                    <div>
+                      <label className="text-sm text-neutral-700">개인</label>
+                      <textarea
+                        value={weeklyPersonal}
+                        onChange={(e) => setWeeklyPersonal(e.target.value)}
+                        className="mt-2 w-full input min-h-[70px] resize-none px-4 py-3"
+                        placeholder="개인 기도제목"
+                      />
+                    </div>
 
-  <div>
-    <label className="text-sm text-neutral-700">여디디야</label>
-    <textarea
-      value={weeklyJedidiah}
-      onChange={(e) => setWeeklyJedidiah(e.target.value)}
-      className="mt-2 w-full input min-h-[70px] resize-none px-4 py-3"
-      placeholder="여디디야 기도제목"
-    />
-  </div>
+                    <div>
+                      <label className="text-sm text-neutral-700">여디디야</label>
+                      <textarea
+                        value={weeklyJedidiah}
+                        onChange={(e) => setWeeklyJedidiah(e.target.value)}
+                        className="mt-2 w-full input min-h-[70px] resize-none px-4 py-3"
+                        placeholder="여디디야 기도제목"
+                      />
+                    </div>
 
-  <div>
-    <label className="text-sm text-neutral-700">학교</label>
-    <textarea
-      value={weeklySchool}
-      onChange={(e) => setWeeklySchool(e.target.value)}
-      className="mt-2 w-full input min-h-[70px] resize-none px-4 py-3"
-      placeholder="학교 기도제목"
-    />
-  </div>
-</div>
-
+                    <div>
+                      <label className="text-sm text-neutral-700">학교</label>
+                      <textarea
+                        value={weeklySchool}
+                        onChange={(e) => setWeeklySchool(e.target.value)}
+                        className="mt-2 w-full input min-h-[70px] resize-none px-4 py-3"
+                        placeholder="학교 기도제목"
+                      />
+                    </div>
+                  </div>
 
                   <div className="mt-3 flex justify-end">
                     <button onClick={addWeeklyPrayer} className="btn btn-primary">
@@ -643,9 +835,7 @@ async function addWeeklyPrayer() {
                     </button>
                   </div>
 
-                  <p className="mt-3 text-xs text-neutral-600">
-                    함께 기도해 주세요.
-                  </p>
+                  <p className="mt-3 text-xs text-neutral-600">함께 기도해 주세요.</p>
                 </section>
               ) : viewMode === "intercession" ? (
                 <section className="card p-6">
@@ -656,6 +846,28 @@ async function addWeeklyPrayer() {
                   <p className="mt-2 text-xs text-neutral-600">
                     (기도 버튼을 누르면 댓글에 “기도합니다. 사랑합니다”가 자동으로 추가됩니다.)
                   </p>
+                </section>
+              ) : viewMode === "members" ? (
+                <section className="card p-6">
+                  <div className="text-base font-semibold text-neutral-900">회원별 기도제목</div>
+                  <p className="mt-3 text-sm text-neutral-700 leading-relaxed">
+                    아래에서 회원 이름을 선택하면, 해당 회원이 작성한 “개인 기도제목(prayers)”만 모아 볼 수 있습니다.
+                    (공동 기도제목인 “금주의 기도제목(weekly_prayers)”은 제외됩니다.)
+                  </p>
+
+                  <div className="mt-4">
+                    <label className="text-sm text-neutral-700">회원 검색</label>
+                    <input
+                      value={membersQuery}
+                      onChange={(e) => setMembersQuery(e.target.value)}
+                      className="w-full input mt-2 px-4 py-3"
+                      placeholder="이름 또는 이메일로 검색"
+                    />
+                  </div>
+
+                  <div className="mt-4 text-xs text-neutral-600">
+                    * 익명 글은 “익명”에서 따로 모아 볼 수 있습니다.
+                  </div>
                 </section>
               ) : (
                 <section className="card p-6">
@@ -720,6 +932,8 @@ async function addWeeklyPrayer() {
                     ? "금주의 기도제목"
                     : viewMode === "intercession"
                     ? "중보기도 목록"
+                    : viewMode === "members"
+                    ? `회원별 기도제목 (${selectedMemberName})`
                     : viewMode === "mine"
                     ? "나의 기도제목"
                     : viewMode === "byDate"
@@ -731,10 +945,70 @@ async function addWeeklyPrayer() {
                   <span className="text-xs text-neutral-500">{weeklyPrayers.length}개</span>
                 ) : viewMode === "intercession" ? (
                   <span className="text-xs text-neutral-500">{intercessions.length}개</span>
+                ) : viewMode === "members" ? (
+                  <span className="text-xs text-neutral-500">{memberPrayers.length}개</span>
                 ) : (
                   <span className="text-xs text-neutral-500">{prayersCountLabel}</span>
                 )}
               </div>
+
+              {/* (NEW) 회원별 기도제목 */}
+              {viewMode === "members" && (
+                <section className="space-y-4">
+                  {/* 상단: 회원 선택 */}
+                  <div className="card p-4">
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        className={`btn ${selectedMemberUid === "anonymous" ? "btn-primary" : ""}`}
+                        onClick={() => setSelectedMemberUid("anonymous")}
+                        type="button"
+                      >
+                        익명
+                      </button>
+
+                      {filteredMembers.length === 0 ? (
+                        <span className="text-sm text-neutral-600">표시할 회원이 없습니다.</span>
+                      ) : (
+                        filteredMembers.map((m) => (
+                          <button
+                            key={m.uid}
+                            className={`btn ${selectedMemberUid === m.uid ? "btn-primary" : ""}`}
+                            onClick={() => setSelectedMemberUid(m.uid)}
+                            type="button"
+                            title={m.email || ""}
+                          >
+                            {m.displayName}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                    <div className="mt-3 text-xs text-neutral-600">
+                      * 이름을 누르면 해당 회원의 “개인 기도제목(prayers)”만 표시됩니다.
+                    </div>
+                  </div>
+
+                  {/* 선택된 회원의 글 목록 */}
+                  {memberPrayers.length === 0 ? (
+                    <div className="card p-6 text-sm text-neutral-700">
+                      {selectedMemberUid === "anonymous"
+                        ? "아직 익명 기도제목이 없습니다."
+                        : "아직 이 회원이 작성한 개인 기도제목이 없습니다. (익명/공동 글은 제외됩니다)"}
+                    </div>
+                  ) : (
+                    memberPrayers.map((p) => (
+                      <PrayerCard
+                        key={p.id}
+                        p={p}
+                        openCommentsId={openCommentsId}
+                        setOpenCommentsId={setOpenCommentsId}
+                        onPray={prayAndAutoComment}
+                        onToggleAnswered={toggleAnswered}
+                        onDelete={deletePrayer}
+                      />
+                    ))
+                  )}
+                </section>
+              )}
 
               {/* (5) 중보기도 목록 */}
               {viewMode === "intercession" && (
@@ -762,8 +1036,6 @@ async function addWeeklyPrayer() {
                           <button
                             className="btn"
                             onClick={() => {
-                              // 원문 기도제목의 댓글창을 열기 위해 viewMode를 all로 이동 + 댓글 오픈
-                              // (원하면 intercession에서도 Comments를 붙일 수 있지만, 구조 단순화를 위해 이동 방식 채택)
                               setViewMode("all");
                               setOpenCommentsId(it.prayerId);
                             }}
@@ -789,10 +1061,7 @@ async function addWeeklyPrayer() {
                         <div key={w.id} className="card p-6">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-sm text-neutral-700">
-                              작성자:{" "}
-                              <span className="font-medium">
-  {w.authorName || "알 수 없음"}
-</span>
+                              작성자: <span className="font-medium">{w.authorName || "알 수 없음"}</span>
                             </span>
                           </div>
 
@@ -821,7 +1090,17 @@ async function addWeeklyPrayer() {
 
                   {/* ✅ byDate일 때: 날짜 헤더로 묶어서 출력 */}
                   {viewMode !== "byDate" ? (
-                    prayers.map((p) => <PrayerCard key={p.id} p={p} openCommentsId={openCommentsId} setOpenCommentsId={setOpenCommentsId} onPray={prayAndAutoComment} onToggleAnswered={toggleAnswered} onDelete={deletePrayer} />)
+                    prayers.map((p) => (
+                      <PrayerCard
+                        key={p.id}
+                        p={p}
+                        openCommentsId={openCommentsId}
+                        setOpenCommentsId={setOpenCommentsId}
+                        onPray={prayAndAutoComment}
+                        onToggleAnswered={toggleAnswered}
+                        onDelete={deletePrayer}
+                      />
+                    ))
                   ) : groupedByDate.length === 0 ? (
                     <div className="card p-6 text-sm text-neutral-700">표시할 기도제목이 없습니다.</div>
                   ) : (
@@ -832,7 +1111,15 @@ async function addWeeklyPrayer() {
                         </div>
 
                         {list.map((p) => (
-                          <PrayerCard key={p.id} p={p} openCommentsId={openCommentsId} setOpenCommentsId={setOpenCommentsId} onPray={prayAndAutoComment} onToggleAnswered={toggleAnswered} onDelete={deletePrayer} />
+                          <PrayerCard
+                            key={p.id}
+                            p={p}
+                            openCommentsId={openCommentsId}
+                            setOpenCommentsId={setOpenCommentsId}
+                            onPray={prayAndAutoComment}
+                            onToggleAnswered={toggleAnswered}
+                            onDelete={deletePrayer}
+                          />
                         ))}
                       </div>
                     ))
@@ -915,9 +1202,9 @@ function PrayerCard({
 }
 
 function Comments({ prayerId }: { prayerId: string }) {
-  const [items, setItems] = useState<
-  { id: string; text: string; authorName: string; authorUid?: string }[]
->([]);
+  const [items, setItems] = useState<{ id: string; text: string; authorName: string; authorUid?: string }[]>(
+    []
+  );
   const [text, setText] = useState("");
 
   useEffect(() => {
@@ -927,11 +1214,11 @@ function Comments({ prayerId }: { prayerId: string }) {
         snap.docs.map((d) => {
           const data = d.data() as any;
           return {
-  id: d.id,
-  text: data.text ?? "",
-  authorName: data.authorName ?? "",
-  authorUid: data.authorUid ?? "",
-};
+            id: d.id,
+            text: data.text ?? "",
+            authorName: data.authorName ?? "",
+            authorUid: data.authorUid ?? "",
+          };
         })
       );
     });
@@ -953,14 +1240,14 @@ function Comments({ prayerId }: { prayerId: string }) {
     setText("");
   }
 
-async function deleteComment(commentId: string) {
-  if (!auth.currentUser) return alert("로그인이 필요합니다.");
+  async function deleteComment(commentId: string) {
+    if (!auth.currentUser) return alert("로그인이 필요합니다.");
 
-  const ok = confirm("이 댓글을 삭제하시겠습니까?");
-  if (!ok) return;
+    const ok = confirm("이 댓글을 삭제하시겠습니까?");
+    if (!ok) return;
 
-  await deleteDoc(doc(db, "prayers", prayerId, "comments", commentId));
-}
+    await deleteDoc(doc(db, "prayers", prayerId, "comments", commentId));
+  }
 
   return (
     <div className="mt-5 card p-4">
@@ -969,28 +1256,24 @@ async function deleteComment(commentId: string) {
           <div className="text-sm text-neutral-600">아직 댓글이 없습니다.</div>
         ) : (
           items.map((c) => {
-  const isMine = auth.currentUser?.uid && c.authorUid === auth.currentUser.uid;
+            const isMine = auth.currentUser?.uid && c.authorUid === auth.currentUser.uid;
 
-  return (
-    <div key={c.id} className="text-sm flex items-start justify-between gap-3">
-      <div className="min-w-0">
-        <span className="font-medium">{c.authorName}</span>
-        <span className="text-neutral-500">: </span>
-        <span className="whitespace-pre-wrap">{c.text}</span>
-      </div>
+            return (
+              <div key={c.id} className="text-sm flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <span className="font-medium">{c.authorName}</span>
+                  <span className="text-neutral-500">: </span>
+                  <span className="whitespace-pre-wrap">{c.text}</span>
+                </div>
 
-      {isMine && (
-        <button
-          className="btn"
-          onClick={() => deleteComment(c.id)}
-          type="button"
-        >
-          🗑️ 삭제
-        </button>
-      )}
-    </div>
-  );
-})
+                {isMine && (
+                  <button className="btn" onClick={() => deleteComment(c.id)} type="button">
+                    🗑️ 삭제
+                  </button>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
 

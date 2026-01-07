@@ -8,13 +8,13 @@ import {
   deleteDoc,
   doc,
   getDocs,
-  increment,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
   updateDoc,
   where,
+  setDoc,
 } from "firebase/firestore";
 import {
   GoogleAuthProvider,
@@ -34,12 +34,43 @@ type Prayer = {
   isAnonymous: boolean;
   authorUid: string;
   authorName: string;
-  prayedCount: number;
+  prayedCount: number; // DB에는 남겨도 무방(화면에서는 숨김)
   isAnswered: boolean;
   createdAt?: any;
 };
 
-type ViewMode = "all" | "mine" | "byDate";
+type WeeklyPrayer = {
+  id: string;
+  content: string;
+  authorUid: string;
+  authorName: string;
+  createdAt?: any;
+};
+
+type IntercessionItem = {
+  id: string; // prayerId를 문서 id로 사용
+  prayerId: string;
+  prayedAt?: any;
+  date?: string;
+  content?: string;
+  authorName?: string;
+  isAnonymous?: boolean;
+};
+
+type ViewMode = "all" | "mine" | "byDate" | "intercession" | "weekly";
+
+/** (1) 댓글 개수 표시용 훅 */
+function useCommentsCount(prayerId: string) {
+  const [count, setCount] = useState<number>(0);
+
+  useEffect(() => {
+    const q = query(collection(db, "prayers", prayerId, "comments"));
+    const unsub = onSnapshot(q, (snap) => setCount(snap.size));
+    return () => unsub();
+  }, [prayerId]);
+
+  return count;
+}
 
 export default function HomePage() {
   // ===== Auth =====
@@ -56,10 +87,23 @@ export default function HomePage() {
   // 상단 메뉴(보기 모드)
   const [viewMode, setViewMode] = useState<ViewMode>("all");
 
-  // 작성 폼
+  // (4) ☰ MENU 드롭다운
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // 작성 폼(일반 기도제목)
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [content, setContent] = useState("");
+
+  // (6) 금주의 기도제목 폼/목록
+const [weeklyMeditation, setWeeklyMeditation] = useState("");
+const [weeklyPersonal, setWeeklyPersonal] = useState("");
+const [weeklyJedidiah, setWeeklyJedidiah] = useState("");
+const [weeklySchool, setWeeklySchool] = useState("");
+  const [weeklyPrayers, setWeeklyPrayers] = useState<WeeklyPrayer[]>([]);
+
+  // (5) 중보기도 목록(내가 기도한 목록)
+  const [intercessions, setIntercessions] = useState<IntercessionItem[]>([]);
 
   // 목록/댓글
   const [prayers, setPrayers] = useState<Prayer[]>([]);
@@ -84,15 +128,16 @@ export default function HomePage() {
 
   // ===== (정석) viewMode에 따라 Firestore 쿼리를 "따로" 구독 =====
   // - all / byDate: 전체를 createdAt desc로 구독
-  // - mine: where(authorUid==uid) + orderBy(createdAt desc) 구독 (복합 인덱스 필요할 수 있음)
+  // - mine: where(authorUid==uid) + orderBy(createdAt desc) 구독
+  // - intercession / weekly: 별도 구독(아래 useEffect)
   useEffect(() => {
     if (!isLoggedIn) return;
+    if (viewMode === "intercession" || viewMode === "weekly") return;
 
     const uid = auth.currentUser?.uid;
     if (viewMode === "mine" && !uid) return;
 
     const base = collection(db, "prayers");
-
     const q =
       viewMode === "mine"
         ? query(base, where("authorUid", "==", uid), orderBy("createdAt", "desc"))
@@ -119,6 +164,58 @@ export default function HomePage() {
     return () => unsub();
   }, [isLoggedIn, viewMode]);
 
+  // (6) 금주의 기도제목 목록 구독
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    if (viewMode !== "weekly") return;
+
+    const q = query(collection(db, "weekly_prayers"), orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      const items: WeeklyPrayer[] = snap.docs.map((d) => {
+  const data = d.data() as any;
+  return {
+    id: d.id,
+    content: data.content ?? "",
+    authorUid: data.authorUid ?? "",
+    authorName: data.authorName ?? "",
+    createdAt: data.createdAt,
+  };
+});
+setWeeklyPrayers(items);
+
+    });
+
+    return () => unsub();
+  }, [isLoggedIn, viewMode]);
+
+  // (5) 중보기도 목록 구독
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    if (viewMode !== "intercession") return;
+
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+
+    const q = query(collection(db, "users", uid, "intercessions"), orderBy("prayedAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      const items: IntercessionItem[] = snap.docs.map((d) => {
+        const data = d.data() as any;
+        return {
+          id: d.id,
+          prayerId: data.prayerId ?? d.id,
+          prayedAt: data.prayedAt,
+          date: data.date,
+          content: data.content,
+          authorName: data.authorName,
+          isAnonymous: !!data.isAnonymous,
+        };
+      });
+      setIntercessions(items);
+    });
+
+    return () => unsub();
+  }, [isLoggedIn, viewMode]);
+
   const prayersCountLabel = useMemo(() => `${prayers.length}개`, [prayers.length]);
 
   // 날짜별 그룹 (byDate에서 사용)
@@ -129,7 +226,6 @@ export default function HomePage() {
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(p);
     }
-    // "YYYY-MM-DD"이면 문자열 내림차순 정렬로 날짜 내림차순이 잘 동작
     return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
   }, [prayers]);
 
@@ -169,6 +265,7 @@ export default function HomePage() {
     try {
       await signOut(auth);
       setOpenCommentsId(null);
+      setMenuOpen(false);
     } catch (err: any) {
       alert(err?.message ?? "로그아웃 중 오류가 발생했습니다.");
     }
@@ -195,11 +292,6 @@ export default function HomePage() {
     setIsAnonymous(false);
   }
 
-  async function prayPlusOne(prayerId: string) {
-    const ref = doc(db, "prayers", prayerId);
-    await updateDoc(ref, { prayedCount: increment(1) });
-  }
-
   async function toggleAnswered(prayerId: string, current: boolean) {
     const ref = doc(db, "prayers", prayerId);
     await updateDoc(ref, { isAnswered: !current });
@@ -223,6 +315,106 @@ export default function HomePage() {
 
     await deleteDoc(doc(db, "prayers", prayer.id));
     if (openCommentsId === prayer.id) setOpenCommentsId(null);
+
+    // (5) 내 중보기도 목록에 있으면 같이 제거(선택)
+    try {
+      const uid = auth.currentUser.uid;
+      await deleteDoc(doc(db, "users", uid, "intercessions", prayer.id));
+    } catch {}
+  }
+
+  // (2) '기도했어요' -> 기도수는 화면에서 삭제 + 자동 댓글 추가
+  async function prayAndAutoComment(prayer: Prayer) {
+    if (!auth.currentUser) return alert("로그인이 필요합니다.");
+
+    const fixed = "기도합니다. 사랑합니다";
+
+    // 자동 댓글 추가
+    await addDoc(collection(db, "prayers", prayer.id, "comments"), {
+      text: fixed,
+      authorName: auth.currentUser.displayName ?? auth.currentUser.email ?? "알 수 없음",
+      authorUid: auth.currentUser.uid,
+      createdAt: serverTimestamp(),
+      kind: "auto_prayed",
+    });
+
+    // 댓글창 자동 오픈
+    setOpenCommentsId(prayer.id);
+
+    // (5) 중보기도 목록에 기록(문서 id = prayerId)
+    try {
+      const uid = auth.currentUser.uid;
+      await setDoc(doc(db, "users", uid, "intercessions", prayer.id), {
+        prayerId: prayer.id,
+        prayedAt: serverTimestamp(),
+        date: prayer.date,
+        content: prayer.content,
+        authorName: prayer.authorName,
+        isAnonymous: prayer.isAnonymous,
+      });
+    } catch {}
+  }
+
+  // (6) 금주의 기도제목 추가
+// (6) 금주의 기도제목 추가
+async function addWeeklyPrayer() {
+  if (!auth.currentUser) return alert("로그인이 필요합니다.");
+
+  const meditation = weeklyMeditation.trim();
+  const personal = weeklyPersonal.trim();
+  const jedidiah = weeklyJedidiah.trim();
+  const school = weeklySchool.trim();
+
+  // 4칸 중 하나도 안 쓰면 막기(원하면 조건 바꿀 수 있음)
+  if (!meditation && !personal && !jedidiah && !school) {
+    return alert("금주의 기도제목 내용을 입력해 주세요.");
+  }
+
+  // 요청하신 자동 포맷
+  const formatted =
+    `<말씀 묵상> ${meditation}\n` +
+    `- 개인: ${personal}\n` +
+    `- 여디디야: ${jedidiah}\n` +
+    `- 학교: ${school}`;
+
+  await addDoc(collection(db, "weekly_prayers"), {
+    content: formatted, // 화면 표시/저장용
+    // (선택) 나중에 수정/검색 편하려고 원본도 같이 저장
+    meditation,
+    personal,
+    jedidiah,
+    school,
+    authorUid: auth.currentUser.uid,
+    authorName: auth.currentUser.displayName ?? auth.currentUser.email ?? "알 수 없음",
+    createdAt: serverTimestamp(),
+  });
+
+  // 입력칸 초기화
+  setWeeklyMeditation("");
+  setWeeklyPersonal("");
+  setWeeklyJedidiah("");
+  setWeeklySchool("");
+}
+
+  async function deleteWeeklyPrayer(item: WeeklyPrayer) {
+    if (!auth.currentUser) return alert("로그인이 필요합니다.");
+    if (item.authorUid !== auth.currentUser.uid) {
+      return alert("본인이 작성한 금주의 기도제목만 삭제할 수 있습니다.");
+    }
+    const ok = confirm("정말 삭제하시겠습니까?");
+    if (!ok) return;
+
+    await deleteDoc(doc(db, "weekly_prayers", item.id));
+  }
+
+  function closeMenu() {
+    setMenuOpen(false);
+  }
+
+  function goto(mode: ViewMode) {
+    setViewMode(mode);
+    setOpenCommentsId(null);
+    setMenuOpen(false);
   }
 
   // ===== UI: 로그인 화면 =====
@@ -232,9 +424,7 @@ export default function HomePage() {
         <div className="w-full max-w-md py-16">
           <div className="card p-7">
             <h1 className="text-2xl font-semibold tracking-tight">여디디야 기도제목 나눔</h1>
-            <p className="text-sm text-neutral-600 mt-2">
-              기도제목을 나누고 함께 기도하는 공간입니다.
-            </p>
+            <p className="text-sm text-neutral-600 mt-2">기도제목을 나누고 함께 기도하는 공간입니다.</p>
 
             <div className="mt-6 flex gap-2">
               <button
@@ -259,7 +449,7 @@ export default function HomePage() {
                 <input
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  className="w-full input mt-2"
+                  className="w-full input mt-2 px-4 py-3"
                   placeholder="예: 하준"
                 />
               </div>
@@ -271,7 +461,7 @@ export default function HomePage() {
                 <input
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full input mt-2"
+                  className="w-full input mt-2 px-4 py-3"
                   placeholder="example@email.com"
                 />
               </div>
@@ -282,7 +472,7 @@ export default function HomePage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   type="password"
-                  className="w-full input mt-2"
+                  className="w-full input mt-2 px-4 py-3"
                   placeholder="비밀번호"
                 />
               </div>
@@ -321,42 +511,71 @@ export default function HomePage() {
               </div>
             </div>
 
-            {/* ✅ 메뉴 탭 + 로그아웃(맨 오른쪽) */}
-            <div className="flex flex-wrap items-center gap-2">
+            {/* (4) ☰ MENU + 로그아웃 */}
+            <div className="flex items-center gap-2 relative">
               <button
                 type="button"
-                onClick={() => {
-                  setViewMode("all");
-                  setOpenCommentsId(null);
-                }}
-                className={`btn ${viewMode === "all" ? "btn-primary" : ""}`}
+                className="btn"
+                onClick={() => setMenuOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
               >
-                전체 기도제목
+                ☰ MENU
               </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setViewMode("mine");
-                  setOpenCommentsId(null);
-                }}
-                className={`btn ${viewMode === "mine" ? "btn-primary" : ""}`}
-              >
-                나의 기도제목 모아보기
-              </button>
+              {menuOpen && (
+                <div
+                  className="absolute right-0 top-[44px] w-56 card p-2 shadow-sm border border-neutral-200 bg-white z-50"
+                  onMouseLeave={() => setMenuOpen(false)}
+                >
+                  <button
+                    className={`w-full text-left btn ${viewMode === "all" ? "btn-primary" : ""}`}
+                    onClick={() => goto("all")}
+                    type="button"
+                  >
+                    전체 기도제목
+                  </button>
+                  <button
+                    className={`w-full text-left btn ${viewMode === "mine" ? "btn-primary" : ""}`}
+                    onClick={() => goto("mine")}
+                    type="button"
+                  >
+                    나의 기도제목
+                  </button>
+                  <button
+                    className={`w-full text-left btn ${viewMode === "byDate" ? "btn-primary" : ""}`}
+                    onClick={() => goto("byDate")}
+                    type="button"
+                  >
+                    날짜별 모아보기
+                  </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setViewMode("byDate");
-                  setOpenCommentsId(null);
-                }}
-                className={`btn ${viewMode === "byDate" ? "btn-primary" : ""}`}
-              >
-                날짜별 모아보기
-              </button>
+                  <div className="my-2 h-px bg-neutral-200" />
 
-              <button onClick={handleLogout} className="btn ml-auto">
+                  <button
+                    className={`w-full text-left btn ${viewMode === "intercession" ? "btn-primary" : ""}`}
+                    onClick={() => goto("intercession")}
+                    type="button"
+                  >
+                    중보기도 목록
+                  </button>
+                  <button
+                    className={`w-full text-left btn ${viewMode === "weekly" ? "btn-primary" : ""}`}
+                    onClick={() => goto("weekly")}
+                    type="button"
+                  >
+                    금주의 기도제목
+                  </button>
+
+                  <div className="my-2 h-px bg-neutral-200" />
+
+                  <button onClick={() => closeMenu()} className="w-full btn" type="button">
+                    닫기
+                  </button>
+                </div>
+              )}
+
+              <button onClick={handleLogout} className="btn">
                 로그아웃
               </button>
             </div>
@@ -367,60 +586,129 @@ export default function HomePage() {
       {/* AppBar 높이만큼 padding-top */}
       <div className="pt-[92px] sm:pt-[68px] flex justify-center px-4">
         <div className="w-full max-w-6xl py-6 text-sm leading-relaxed">
-          {/* 2단 레이아웃: flex로 강제 분리 */}
+          {/* 2단 레이아웃 */}
           <div className="flex flex-col lg:flex-row gap-6 items-start">
-            {/* 왼쪽: 작성란 */}
+            {/* 왼쪽: 작성란 (viewMode에 따라 다르게) */}
             <div className="w-full lg:w-[420px] shrink-0 lg:sticky lg:top-[84px] space-y-4">
-              <section className="card p-6">
-                <div className="flex flex-col md:flex-row md:items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm text-neutral-700">날짜</label>
-                    <input
-                      type="date"
-                      value={date}
-                      onChange={(e) => setDate(e.target.value)}
-                      className="input py-2 px-3"
-                    />
+              {viewMode === "weekly" ? (
+                <section className="card p-6">
+                  <div className="text-base font-semibold text-neutral-900">금주의 기도제목 작성</div>
+
+                  <div className="mt-4 space-y-3">
+  <div>
+    <label className="text-sm text-neutral-700">말씀 묵상</label>
+    <textarea
+      value={weeklyMeditation}
+      onChange={(e) => setWeeklyMeditation(e.target.value)}
+      className="mt-2 w-full input min-h-[90px] resize-none px-4 py-3"
+      placeholder="이번 주 말씀 묵상 내용을 적어 주세요."
+    />
+  </div>
+
+  <div>
+    <label className="text-sm text-neutral-700">개인</label>
+    <textarea
+      value={weeklyPersonal}
+      onChange={(e) => setWeeklyPersonal(e.target.value)}
+      className="mt-2 w-full input min-h-[70px] resize-none px-4 py-3"
+      placeholder="개인 기도제목"
+    />
+  </div>
+
+  <div>
+    <label className="text-sm text-neutral-700">여디디야</label>
+    <textarea
+      value={weeklyJedidiah}
+      onChange={(e) => setWeeklyJedidiah(e.target.value)}
+      className="mt-2 w-full input min-h-[70px] resize-none px-4 py-3"
+      placeholder="여디디야 기도제목"
+    />
+  </div>
+
+  <div>
+    <label className="text-sm text-neutral-700">학교</label>
+    <textarea
+      value={weeklySchool}
+      onChange={(e) => setWeeklySchool(e.target.value)}
+      className="mt-2 w-full input min-h-[70px] resize-none px-4 py-3"
+      placeholder="학교 기도제목"
+    />
+  </div>
+</div>
+
+
+                  <div className="mt-3 flex justify-end">
+                    <button onClick={addWeeklyPrayer} className="btn btn-primary">
+                      금주의 기도제목 올리기!
+                    </button>
                   </div>
 
-                  <label className="inline-flex items-center gap-2 text-sm text-neutral-700 md:ml-auto">
-                    <input
-                      type="checkbox"
-                      checked={isAnonymous}
-                      onChange={(e) => setIsAnonymous(e.target.checked)}
-                    />
-                    익명으로 올리기
-                  </label>
-                </div>
-
-                <textarea
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  className="mt-3 w-full input min-h-[140px] resize-none"
-                  placeholder="기도제목을 적어 주세요."
-                />
-
-                <div className="mt-3 flex justify-end">
-                  <button onClick={addPrayer} className="btn btn-primary">
-                    기도제목 올리기!
-                  </button>
-                </div>
-
-                {viewMode === "mine" && (
                   <p className="mt-3 text-xs text-neutral-600">
-                    현재 “나의 기도제목 모아보기” 상태입니다. 아래에는 본인 글만 표시됩니다.
+                    함께 기도해 주세요.
                   </p>
-                )}
+                </section>
+              ) : viewMode === "intercession" ? (
+                <section className="card p-6">
+                  <div className="text-base font-semibold text-neutral-900">중보기도 목록</div>
+                  <p className="mt-3 text-sm text-neutral-700 leading-relaxed">
+                    “🙏 기도했어요”를 누른 기도제목이 여기에 기록됩니다. 한 번에 확인할 수 있습니다.
+                  </p>
+                  <p className="mt-2 text-xs text-neutral-600">
+                    (기도 버튼을 누르면 댓글에 “기도합니다. 사랑합니다”가 자동으로 추가됩니다.)
+                  </p>
+                </section>
+              ) : (
+                <section className="card p-6">
+                  <div className="flex flex-col md:flex-row md:items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-neutral-700">날짜</label>
+                      <input
+                        type="date"
+                        value={date}
+                        onChange={(e) => setDate(e.target.value)}
+                        className="input px-4 py-3"
+                      />
+                    </div>
 
-                {viewMode === "byDate" && (
-                  <p className="mt-3 text-xs text-neutral-600">
-                    현재 “날짜별 모아보기” 상태입니다. 아래에 날짜별로 묶여 표시됩니다.
-                  </p>
-                )}
-              </section>
+                    <label className="inline-flex items-center gap-2 text-sm text-neutral-700 md:ml-auto">
+                      <input
+                        type="checkbox"
+                        checked={isAnonymous}
+                        onChange={(e) => setIsAnonymous(e.target.checked)}
+                      />
+                      익명으로 올리기
+                    </label>
+                  </div>
+
+                  <textarea
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    className="mt-3 w-full input min-h-[140px] resize-none px-4 py-3"
+                    placeholder="기도제목을 적어 주세요."
+                  />
+
+                  <div className="mt-3 flex justify-end">
+                    <button onClick={addPrayer} className="btn btn-primary">
+                      기도제목 올리기!
+                    </button>
+                  </div>
+
+                  {viewMode === "mine" && (
+                    <p className="mt-3 text-xs text-neutral-600">
+                      현재 “나의 기도제목” 상태입니다. 아래에는 본인 글만 표시됩니다.
+                    </p>
+                  )}
+
+                  {viewMode === "byDate" && (
+                    <p className="mt-3 text-xs text-neutral-600">
+                      현재 “날짜별 모아보기” 상태입니다. 아래에 날짜별로 묶여 표시됩니다.
+                    </p>
+                  )}
+                </section>
+              )}
 
               <footer className="text-xs text-neutral-600 leading-relaxed">
-                * 각자의 기도제목을 편하게 나눠주세요! 기도하겠습니다.
+                * 각자의 기도제목을 편하게 나눠주세요. 함께 기도하겠습니다.
               </footer>
             </div>
 
@@ -428,141 +716,130 @@ export default function HomePage() {
             <div className="w-full flex-1 min-w-0 space-y-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-semibold text-neutral-900">
-                  {viewMode === "mine"
+                  {viewMode === "weekly"
+                    ? "금주의 기도제목"
+                    : viewMode === "intercession"
+                    ? "중보기도 목록"
+                    : viewMode === "mine"
                     ? "나의 기도제목"
                     : viewMode === "byDate"
                     ? "날짜별 기도제목"
                     : "등록된 기도제목"}
                 </h2>
-                <span className="text-xs text-neutral-500">{prayersCountLabel}</span>
+
+                {viewMode === "weekly" ? (
+                  <span className="text-xs text-neutral-500">{weeklyPrayers.length}개</span>
+                ) : viewMode === "intercession" ? (
+                  <span className="text-xs text-neutral-500">{intercessions.length}개</span>
+                ) : (
+                  <span className="text-xs text-neutral-500">{prayersCountLabel}</span>
+                )}
               </div>
 
-              {viewMode === "mine" && prayers.length === 0 && (
-                <div className="card p-6 text-sm text-neutral-700">아직 작성한 기도제목이 없습니다.</div>
-              )}
-
-              <section className="space-y-4">
-                {/* ✅ byDate일 때: 날짜 헤더로 묶어서 출력 */}
-                {viewMode !== "byDate" ? (
-                  prayers.map((p) => {
-                    const isMine = auth.currentUser?.uid === p.authorUid;
-
-                    return (
-                      <div key={p.id} className="card p-6">
+              {/* (5) 중보기도 목록 */}
+              {viewMode === "intercession" && (
+                <section className="space-y-4">
+                  {intercessions.length === 0 ? (
+                    <div className="card p-6 text-sm text-neutral-700">
+                      아직 “🙏 기도했어요”를 누른 기도제목이 없습니다.
+                    </div>
+                  ) : (
+                    intercessions.map((it) => (
+                      <div key={it.id} className="card p-6">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm text-neutral-700">
                             작성자:{" "}
                             <span className="font-medium">
-                              {p.isAnonymous ? "익명" : p.authorName || "알 수 없음"}
+                              {it.isAnonymous ? "익명" : it.authorName || "알 수 없음"}
                             </span>
                           </span>
                           <span className="text-xs text-neutral-500">•</span>
-                          <span className="text-sm text-neutral-700">날짜: {p.date}</span>
-                          {p.isAnswered && <span className="ml-1 badge badge-success">응답됨 🙌</span>}
+                          <span className="text-sm text-neutral-700">날짜: {it.date || "-"}</span>
                         </div>
-
-                        <p className="mt-3 whitespace-pre-wrap leading-relaxed">{p.content}</p>
+                        <p className="mt-3 whitespace-pre-wrap leading-relaxed">{it.content || ""}</p>
 
                         <div className="mt-4 flex flex-wrap gap-2 items-center">
-                          <button onClick={() => prayPlusOne(p.id)} className="btn">
-                            🙏 기도했어요
-                          </button>
-
-                          <span className="text-sm text-neutral-700">
-                            기도수: <span className="font-semibold">{p.prayedCount}</span>
-                          </span>
-
                           <button
-                            onClick={() => setOpenCommentsId(openCommentsId === p.id ? null : p.id)}
                             className="btn"
+                            onClick={() => {
+                              // 원문 기도제목의 댓글창을 열기 위해 viewMode를 all로 이동 + 댓글 오픈
+                              // (원하면 intercession에서도 Comments를 붙일 수 있지만, 구조 단순화를 위해 이동 방식 채택)
+                              setViewMode("all");
+                              setOpenCommentsId(it.prayerId);
+                            }}
                           >
-                            💬 댓글
+                            💬 댓글 보기
                           </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </section>
+              )}
+
+              {/* (6) 금주의 기도제목 */}
+              {viewMode === "weekly" && (
+                <section className="space-y-4">
+                  {weeklyPrayers.length === 0 ? (
+                    <div className="card p-6 text-sm text-neutral-700">아직 금주의 기도제목이 없습니다.</div>
+                  ) : (
+                    weeklyPrayers.map((w) => {
+                      const isMine = auth.currentUser?.uid === w.authorUid;
+                      return (
+                        <div key={w.id} className="card p-6">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm text-neutral-700">
+                              작성자:{" "}
+                              <span className="font-medium">
+  {w.authorName || "알 수 없음"}
+</span>
+                            </span>
+                          </div>
+
+                          <p className="mt-3 whitespace-pre-wrap leading-relaxed">{w.content}</p>
 
                           {isMine && (
-  <button onClick={() => toggleAnswered(p.id, p.isAnswered)} className="btn">
-    {p.isAnswered ? "응답됨 해제" : "응답됨 표시"}
-  </button>
-)}
-
-                          {isMine && (
-                            <button onClick={() => deletePrayer(p)} className="btn">
-                              🗑️ 삭제
-                            </button>
+                            <div className="mt-4 flex gap-2">
+                              <button onClick={() => deleteWeeklyPrayer(w)} className="btn">
+                                🗑️ 삭제
+                              </button>
+                            </div>
                           )}
                         </div>
+                      );
+                    })
+                  )}
+                </section>
+              )}
 
-                        {openCommentsId === p.id && <Comments prayerId={p.id} />}
+              {/* 기존 기도제목(전체/내글/날짜별) */}
+              {(viewMode === "all" || viewMode === "mine" || viewMode === "byDate") && (
+                <section className="space-y-4">
+                  {viewMode === "mine" && prayers.length === 0 && (
+                    <div className="card p-6 text-sm text-neutral-700">아직 작성한 기도제목이 없습니다.</div>
+                  )}
+
+                  {/* ✅ byDate일 때: 날짜 헤더로 묶어서 출력 */}
+                  {viewMode !== "byDate" ? (
+                    prayers.map((p) => <PrayerCard key={p.id} p={p} openCommentsId={openCommentsId} setOpenCommentsId={setOpenCommentsId} onPray={prayAndAutoComment} onToggleAnswered={toggleAnswered} onDelete={deletePrayer} />)
+                  ) : groupedByDate.length === 0 ? (
+                    <div className="card p-6 text-sm text-neutral-700">표시할 기도제목이 없습니다.</div>
+                  ) : (
+                    groupedByDate.map(([dateKey, list]) => (
+                      <div key={dateKey} className="space-y-3">
+                        <div className="text-sm font-semibold text-neutral-900">
+                          {dateKey} <span className="text-xs text-neutral-500">({list.length}개)</span>
+                        </div>
+
+                        {list.map((p) => (
+                          <PrayerCard key={p.id} p={p} openCommentsId={openCommentsId} setOpenCommentsId={setOpenCommentsId} onPray={prayAndAutoComment} onToggleAnswered={toggleAnswered} onDelete={deletePrayer} />
+                        ))}
                       </div>
-                    );
-                  })
-                ) : groupedByDate.length === 0 ? (
-                  <div className="card p-6 text-sm text-neutral-700">표시할 기도제목이 없습니다.</div>
-                ) : (
-                  groupedByDate.map(([dateKey, list]) => (
-                    <div key={dateKey} className="space-y-3">
-                      <div className="text-sm font-semibold text-neutral-900">
-                        {dateKey} <span className="text-xs text-neutral-500">({list.length}개)</span>
-                      </div>
+                    ))
+                  )}
+                </section>
+              )}
 
-                      {list.map((p) => {
-                        const isMine = auth.currentUser?.uid === p.authorUid;
-
-                        return (
-                          <div key={p.id} className="card p-6">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-sm text-neutral-700">
-                                작성자:{" "}
-                                <span className="font-medium">
-                                  {p.isAnonymous ? "익명" : p.authorName || "알 수 없음"}
-                                </span>
-                              </span>
-                              <span className="text-xs text-neutral-500">•</span>
-                              <span className="text-sm text-neutral-700">날짜: {p.date}</span>
-                              {p.isAnswered && <span className="ml-1 badge badge-success">응답됨 🙌</span>}
-                            </div>
-
-                            <p className="mt-3 whitespace-pre-wrap leading-relaxed">{p.content}</p>
-
-                            <div className="mt-4 flex flex-wrap gap-2 items-center">
-                              <button onClick={() => prayPlusOne(p.id)} className="btn">
-                                🙏 기도했어요
-                              </button>
-
-                              <span className="text-sm text-neutral-700">
-                                기도수: <span className="font-semibold">{p.prayedCount}</span>
-                              </span>
-
-                              <button
-                                onClick={() => setOpenCommentsId(openCommentsId === p.id ? null : p.id)}
-                                className="btn"
-                              >
-                                💬 댓글
-                              </button>
-
-                              {isMine && (
-   <button onClick={() => toggleAnswered(p.id, p.isAnswered)} className="btn">
-    {p.isAnswered ? "응답됨 해제" : "응답됨 표시"}
-  </button>
-)}
-
-                              {isMine && (
-                                <button onClick={() => deletePrayer(p)} className="btn">
-                                  🗑️ 삭제
-                                </button>
-                              )}
-                            </div>
-
-                            {openCommentsId === p.id && <Comments prayerId={p.id} />}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))
-                )}
-              </section>
-
-              {/* (선택) 하단 문구를 원하면 여기처럼 return 안 맨 아래에 배치 */}
               <div className="mt-10 border-t border-neutral-200 pt-4 text-center text-xs text-neutral-500 italic">
                 “너희도 성령 안에서 하나님의 거하실 처소가 되기 위하여 예수 안에서 함께 지어져 가느니라 [엡 2:22]”
               </div>
@@ -574,8 +851,73 @@ export default function HomePage() {
   );
 }
 
+function PrayerCard({
+  p,
+  openCommentsId,
+  setOpenCommentsId,
+  onPray,
+  onToggleAnswered,
+  onDelete,
+}: {
+  p: Prayer;
+  openCommentsId: string | null;
+  setOpenCommentsId: (v: string | null) => void;
+  onPray: (prayer: Prayer) => Promise<void>;
+  onToggleAnswered: (prayerId: string, current: boolean) => Promise<void>;
+  onDelete: (prayer: Prayer) => Promise<void>;
+}) {
+  const isMine = auth.currentUser?.uid === p.authorUid;
+
+  // (1) 댓글 개수
+  const commentsCount = useCommentsCount(p.id);
+
+  return (
+    <div className="card p-6">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-neutral-700">
+          작성자:{" "}
+          <span className="font-medium">{p.isAnonymous ? "익명" : p.authorName || "알 수 없음"}</span>
+        </span>
+        <span className="text-xs text-neutral-500">•</span>
+        <span className="text-sm text-neutral-700">날짜: {p.date}</span>
+        {p.isAnswered && <span className="ml-1 badge badge-success">응답됨 🙌</span>}
+      </div>
+
+      <p className="mt-3 whitespace-pre-wrap leading-relaxed">{p.content}</p>
+
+      <div className="mt-4 flex flex-wrap gap-2 items-center">
+        {/* (2) 기도수 UI 삭제 + 자동 댓글 */}
+        <button onClick={() => onPray(p)} className="btn">
+          🙏 기도했어요
+        </button>
+
+        {/* (1) 댓글 옆 댓글 개수 */}
+        <button onClick={() => setOpenCommentsId(openCommentsId === p.id ? null : p.id)} className="btn">
+          💬 댓글 <span className="text-neutral-600">({commentsCount})</span>
+        </button>
+
+        {isMine && (
+          <button onClick={() => onToggleAnswered(p.id, p.isAnswered)} className="btn">
+            {p.isAnswered ? "응답됨 해제" : "응답됨 표시"}
+          </button>
+        )}
+
+        {isMine && (
+          <button onClick={() => onDelete(p)} className="btn">
+            🗑️ 삭제
+          </button>
+        )}
+      </div>
+
+      {openCommentsId === p.id && <Comments prayerId={p.id} />}
+    </div>
+  );
+}
+
 function Comments({ prayerId }: { prayerId: string }) {
-  const [items, setItems] = useState<{ id: string; text: string; authorName: string }[]>([]);
+  const [items, setItems] = useState<
+  { id: string; text: string; authorName: string; authorUid?: string }[]
+>([]);
   const [text, setText] = useState("");
 
   useEffect(() => {
@@ -584,7 +926,12 @@ function Comments({ prayerId }: { prayerId: string }) {
       setItems(
         snap.docs.map((d) => {
           const data = d.data() as any;
-          return { id: d.id, text: data.text ?? "", authorName: data.authorName ?? "" };
+          return {
+  id: d.id,
+  text: data.text ?? "",
+  authorName: data.authorName ?? "",
+  authorUid: data.authorUid ?? "",
+};
         })
       );
     });
@@ -600,10 +947,20 @@ function Comments({ prayerId }: { prayerId: string }) {
       authorName: auth.currentUser.displayName ?? auth.currentUser.email ?? "알 수 없음",
       authorUid: auth.currentUser.uid,
       createdAt: serverTimestamp(),
+      kind: "user",
     });
 
     setText("");
   }
+
+async function deleteComment(commentId: string) {
+  if (!auth.currentUser) return alert("로그인이 필요합니다.");
+
+  const ok = confirm("이 댓글을 삭제하시겠습니까?");
+  if (!ok) return;
+
+  await deleteDoc(doc(db, "prayers", prayerId, "comments", commentId));
+}
 
   return (
     <div className="mt-5 card p-4">
@@ -611,21 +968,38 @@ function Comments({ prayerId }: { prayerId: string }) {
         {items.length === 0 ? (
           <div className="text-sm text-neutral-600">아직 댓글이 없습니다.</div>
         ) : (
-          items.map((c) => (
-            <div key={c.id} className="text-sm">
-              <span className="font-medium">{c.authorName}</span>
-              <span className="text-neutral-500">: </span>
-              <span className="whitespace-pre-wrap">{c.text}</span>
-            </div>
-          ))
+          items.map((c) => {
+  const isMine = auth.currentUser?.uid && c.authorUid === auth.currentUser.uid;
+
+  return (
+    <div key={c.id} className="text-sm flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <span className="font-medium">{c.authorName}</span>
+        <span className="text-neutral-500">: </span>
+        <span className="whitespace-pre-wrap">{c.text}</span>
+      </div>
+
+      {isMine && (
+        <button
+          className="btn"
+          onClick={() => deleteComment(c.id)}
+          type="button"
+        >
+          🗑️ 삭제
+        </button>
+      )}
+    </div>
+  );
+})
         )}
       </div>
 
       <div className="mt-4 flex gap-2">
+        {/* (3) 칸 안 여백 확대 */}
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          className="flex-1 input"
+          className="flex-1 input px-4 py-3"
           placeholder="댓글을 입력하세요."
         />
         <button onClick={addComment} className="btn btn-primary">

@@ -604,22 +604,28 @@ export default function HomePage() {
   // ===== UI: 로그인 화면 =====
   if (!isLoggedIn) {
     return (
-      <div className="min-h-screen flex justify-center px-4">
-        <div className="w-full max-w-md py-16">
-          <div className="card p-7">
-            <h1 className="text-2xl font-semibold tracking-tight">여디디야 기도제목 나눔</h1>
-            <p className="text-sm text-neutral-600 mt-2">기도제목을 나누고 함께 기도하는 공간입니다.</p>
+      <div className="login-shell">
+        <div className="login-wrap">
+          <div className="card login-card">
+            <div className="login-brand">
+              <div className="brand-mark" aria-hidden="true">J</div>
+              <div>
+                <div className="eyebrow">JEDIDIAH PRAYER</div>
+                <h1 className="login-title">여디디야 기도제목 나눔</h1>
+              </div>
+            </div>
+            <p className="login-description">서로의 기도제목을 나누고, 함께 기억하며 기도하는 공간입니다.</p>
 
-            <div className="mt-6 flex gap-2">
+            <div className="auth-tabs">
               <button
-                className={`btn ${authMode === "signin" ? "btn-primary" : ""}`}
+                className={`auth-tab ${authMode === "signin" ? "is-active" : ""}`}
                 onClick={() => setAuthMode("signin")}
                 type="button"
               >
                 로그인
               </button>
               <button
-                className={`btn ${authMode === "signup" ? "btn-primary" : ""}`}
+                className={`auth-tab ${authMode === "signup" ? "is-active" : ""}`}
                 onClick={() => setAuthMode("signup")}
                 type="button"
               >
@@ -683,33 +689,37 @@ export default function HomePage() {
 
   // ===== UI: 메인 화면 =====
   return (
-    <div className="min-h-screen bg-neutral-50">
+    <div className="app-shell">
       {/* 상단 작업표시줄(App Bar) */}
-      <div className="fixed top-0 left-0 right-0 z-50 border-b border-neutral-200 bg-white/90 backdrop-blur">
-        <div className="mx-auto max-w-6xl px-4 py-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <header className="app-header">
+        <div className="app-header-inner">
+          <div className="brand-block">
+            <div className="brand-mark" aria-hidden="true">J</div>
             <div className="min-w-0">
-              <div className="text-lg font-semibold tracking-tight truncate">여디디야 기도제목 나눔</div>
-              <div className="text-xs text-neutral-600">
-                로그인: <span className="font-medium text-neutral-900">{userName}</span>
-              </div>
+              <div className="eyebrow">JEDIDIAH PRAYER</div>
+              <div className="header-title">여디디야 기도제목 나눔</div>
             </div>
+          </div>
 
-            {/* (4) ☰ MENU + 로그아웃 */}
-            <div className="flex items-center gap-2 relative">
+          {/* (4) ☰ MENU + 로그아웃 */}
+          <div className="header-actions">
+            <div className="user-pill" title={userName}>
+              <span className="user-dot" aria-hidden="true" />
+              <span className="user-name">{userName}</span>
+            </div>
               <button
                 type="button"
-                className="btn"
+                className="btn menu-trigger"
                 onClick={() => setMenuOpen((v) => !v)}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
               >
-                ☰ MENU
+                ☰ 메뉴
               </button>
 
               {menuOpen && (
                 <div
-                  className="absolute right-0 top-[44px] w-56 card p-2 shadow-sm border border-neutral-200 bg-white z-50"
+                  className="menu-panel"
                   onMouseLeave={() => setMenuOpen(false)}
                 >
                   <button
@@ -768,23 +778,22 @@ export default function HomePage() {
                 </div>
               )}
 
-              <button onClick={handleLogout} className="btn">
-                로그아웃
-              </button>
-            </div>
+            <button onClick={handleLogout} className="btn logout-button">
+              로그아웃
+            </button>
           </div>
         </div>
-      </div>
+      </header>
 
       {/* AppBar 높이만큼 padding-top */}
-      <div className="pt-[92px] sm:pt-[68px] flex justify-center px-4">
-        <div className="w-full max-w-6xl py-6 text-sm leading-relaxed">
+      <main className="app-main">
+        <div className="app-container">
           {/* 2단 레이아웃 */}
-          <div className="flex flex-col lg:flex-row gap-6 items-start">
+          <div className="app-layout">
             {/* 왼쪽: 작성란 (viewMode에 따라 다르게) */}
-            <div className="w-full lg:w-[420px] shrink-0 lg:sticky lg:top-[84px] space-y-4">
+            <aside className="sidebar-column">
               {viewMode === "weekly" ? (
-                <section className="card p-6">
+                <section className="card composer-card">
                   <div className="text-base font-semibold text-neutral-900">금주의 기도제목 작성</div>
 
                   <div className="mt-4 space-y-3">
@@ -838,7 +847,7 @@ export default function HomePage() {
                   <p className="mt-3 text-xs text-neutral-600">함께 기도해 주세요.</p>
                 </section>
               ) : viewMode === "intercession" ? (
-                <section className="card p-6">
+                <section className="card composer-card">
                   <div className="text-base font-semibold text-neutral-900">중보기도 목록</div>
                   <p className="mt-3 text-sm text-neutral-700 leading-relaxed">
                     “🙏 기도했어요”를 누른 기도제목이 여기에 기록됩니다. 한 번에 확인할 수 있습니다.
@@ -848,7 +857,7 @@ export default function HomePage() {
                   </p>
                 </section>
               ) : viewMode === "members" ? (
-                <section className="card p-6">
+                <section className="card composer-card">
                   <div className="text-base font-semibold text-neutral-900">회원별 기도제목</div>
                   <p className="mt-3 text-sm text-neutral-700 leading-relaxed">
                     아래에서 회원 이름을 선택하면, 해당 회원이 작성한 “개인 기도제목(prayers)”만 모아 볼 수 있습니다.
@@ -870,8 +879,16 @@ export default function HomePage() {
                   </div>
                 </section>
               ) : (
-                <section className="card p-6">
-                  <div className="flex flex-col md:flex-row md:items-center gap-3">
+                <section className="card composer-card">
+                  <div className="composer-heading">
+                    <div>
+                      <div className="eyebrow">SHARE A PRAYER</div>
+                      <h2 className="composer-title">기도제목 나누기</h2>
+                    </div>
+                    <span className="composer-hint">함께 기도할 내용을 적어주세요</span>
+                  </div>
+
+                  <div className="composer-options">
                     <div className="flex items-center gap-2">
                       <label className="text-sm text-neutral-700">날짜</label>
                       <input
@@ -882,7 +899,7 @@ export default function HomePage() {
                       />
                     </div>
 
-                    <label className="inline-flex items-center gap-2 text-sm text-neutral-700 md:ml-auto">
+                    <label className="anonymous-toggle">
                       <input
                         type="checkbox"
                         checked={isAnonymous}
@@ -895,13 +912,13 @@ export default function HomePage() {
                   <textarea
                     value={content}
                     onChange={(e) => setContent(e.target.value)}
-                    className="mt-3 w-full input min-h-[140px] resize-none px-4 py-3"
+                    className="prayer-textarea input"
                     placeholder="기도제목을 적어 주세요."
                   />
 
                   <div className="mt-3 flex justify-end">
-                    <button onClick={addPrayer} className="btn btn-primary">
-                      기도제목 올리기!
+                    <button onClick={addPrayer} className="btn btn-primary btn-submit">
+                      기도제목 올리기
                     </button>
                   </div>
 
@@ -919,15 +936,18 @@ export default function HomePage() {
                 </section>
               )}
 
-              <footer className="text-xs text-neutral-600 leading-relaxed">
-                * 각자의 기도제목을 편하게 나눠주세요. 함께 기도하겠습니다.
+              <footer className="sidebar-note">
+                <span aria-hidden="true">☀</span>
+                각자의 기도제목을 편하게 나눠주세요. 함께 기도하겠습니다.
               </footer>
-            </div>
+            </aside>
 
             {/* 오른쪽: 목록 */}
-            <div className="w-full flex-1 min-w-0 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-base font-semibold text-neutral-900">
+            <div className="content-column">
+              <div className="section-heading-row">
+                <div>
+                  <div className="eyebrow">PRAYER BOARD</div>
+                  <h2 className="section-title">
                   {viewMode === "weekly"
                     ? "금주의 기도제목"
                     : viewMode === "intercession"
@@ -939,16 +959,17 @@ export default function HomePage() {
                     : viewMode === "byDate"
                     ? "날짜별 기도제목"
                     : "등록된 기도제목"}
-                </h2>
+                  </h2>
+                </div>
 
                 {viewMode === "weekly" ? (
-                  <span className="text-xs text-neutral-500">{weeklyPrayers.length}개</span>
+                  <span className="count-badge">{weeklyPrayers.length}개</span>
                 ) : viewMode === "intercession" ? (
-                  <span className="text-xs text-neutral-500">{intercessions.length}개</span>
+                  <span className="count-badge">{intercessions.length}개</span>
                 ) : viewMode === "members" ? (
-                  <span className="text-xs text-neutral-500">{memberPrayers.length}개</span>
+                  <span className="count-badge">{memberPrayers.length}개</span>
                 ) : (
-                  <span className="text-xs text-neutral-500">{prayersCountLabel}</span>
+                  <span className="count-badge">{prayersCountLabel}</span>
                 )}
               </div>
 
@@ -1019,7 +1040,7 @@ export default function HomePage() {
                     </div>
                   ) : (
                     intercessions.map((it) => (
-                      <div key={it.id} className="card p-6">
+                      <div key={it.id} className="card prayer-card">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-sm text-neutral-700">
                             작성자:{" "}
@@ -1058,7 +1079,7 @@ export default function HomePage() {
                     weeklyPrayers.map((w) => {
                       const isMine = auth.currentUser?.uid === w.authorUid;
                       return (
-                        <div key={w.id} className="card p-6">
+                        <div key={w.id} className="card prayer-card weekly-card">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-sm text-neutral-700">
                               작성자: <span className="font-medium">{w.authorName || "알 수 없음"}</span>
@@ -1127,13 +1148,15 @@ export default function HomePage() {
                 </section>
               )}
 
-              <div className="mt-10 border-t border-neutral-200 pt-4 text-center text-xs text-neutral-500 italic">
-                “너희도 성령 안에서 하나님의 거하실 처소가 되기 위하여 예수 안에서 함께 지어져 가느니라 [엡 2:22]”
+              <div className="verse-footer">
+                <span className="verse-mark" aria-hidden="true">“</span>
+                <span>너희도 성령 안에서 하나님의 거하실 처소가 되기 위하여 예수 안에서 함께 지어져 가느니라</span>
+                <strong>엡 2:22</strong>
               </div>
             </div>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
@@ -1159,52 +1182,59 @@ function PrayerCard({
   const commentsCount = useCommentsCount(p.id);
 
   return (
-    <div className="card p-6">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-neutral-700">
-          작성자:{" "}
-          <span className="font-medium">{p.isAnonymous ? "익명" : p.authorName || "알 수 없음"}</span>
-        </span>
-        <span className="text-xs text-neutral-500">•</span>
-        <span className="text-sm text-neutral-700">날짜: {p.date}</span>
-        {p.isAnswered && <span className="ml-1 badge badge-success">응답됨 🙌</span>}
+    <article className={`card prayer-card ${p.isAnswered ? "is-answered" : ""}`}>
+      <div className="prayer-card-head">
+        <div className="author-block">
+          <div className="author-avatar" aria-hidden="true">
+            {p.isAnonymous ? "익" : (p.authorName || "?").trim().slice(0, 1)}
+          </div>
+          <div className="min-w-0">
+            <div className="author-name">{p.isAnonymous ? "익명" : p.authorName || "알 수 없음"}</div>
+            <div className="prayer-date">{p.date || "날짜 없음"}</div>
+          </div>
+        </div>
+
+        {p.isAnswered && <span className="badge badge-success">응답됨 🙌</span>}
       </div>
 
-      <p className="mt-3 whitespace-pre-wrap leading-relaxed">{p.content}</p>
+      <p className="prayer-content">{p.content}</p>
 
-      <div className="mt-4 flex flex-wrap gap-2 items-center">
+      <div className="prayer-actions">
         {/* (2) 기도수 UI 삭제 + 자동 댓글 */}
-        <button onClick={() => onPray(p)} className="btn">
-          🙏 기도했어요
+        <button onClick={() => onPray(p)} className="btn btn-pray">
+          <span aria-hidden="true">🙏</span>
+          기도했어요
         </button>
 
         {/* (1) 댓글 옆 댓글 개수 */}
-        <button onClick={() => setOpenCommentsId(openCommentsId === p.id ? null : p.id)} className="btn">
-          💬 댓글 <span className="text-neutral-600">({commentsCount})</span>
+        <button
+          onClick={() => setOpenCommentsId(openCommentsId === p.id ? null : p.id)}
+          className={`btn btn-quiet ${openCommentsId === p.id ? "is-active" : ""}`}
+        >
+          <span aria-hidden="true">💬</span>
+          댓글 <span className="action-count">{commentsCount}</span>
         </button>
 
         {isMine && (
-          <button onClick={() => onToggleAnswered(p.id, p.isAnswered)} className="btn">
-            {p.isAnswered ? "응답됨 해제" : "응답됨 표시"}
-          </button>
-        )}
+          <div className="owner-actions">
+            <button onClick={() => onToggleAnswered(p.id, p.isAnswered)} className="btn btn-owner">
+              {p.isAnswered ? "응답됨 해제" : "응답됨 표시"}
+            </button>
 
-        {isMine && (
-          <button onClick={() => onDelete(p)} className="btn">
-            🗑️ 삭제
-          </button>
+            <button onClick={() => onDelete(p)} className="btn btn-danger">
+              삭제
+            </button>
+          </div>
         )}
       </div>
 
       {openCommentsId === p.id && <Comments prayerId={p.id} />}
-    </div>
+    </article>
   );
 }
 
 function Comments({ prayerId }: { prayerId: string }) {
-  const [items, setItems] = useState<{ id: string; text: string; authorName: string; authorUid?: string }[]>(
-    []
-  );
+  const [items, setItems] = useState<{ id: string; text: string; authorName: string; authorUid?: string }[]>([]);
   const [text, setText] = useState("");
 
   useEffect(() => {
@@ -1250,25 +1280,33 @@ function Comments({ prayerId }: { prayerId: string }) {
   }
 
   return (
-    <div className="mt-5 card p-4">
-      <div className="space-y-3">
+    <div className="comments-panel">
+      <div className="comments-title">
+        <span>댓글</span>
+        <span className="comments-count">{items.length}</span>
+      </div>
+
+      <div className="comments-list">
         {items.length === 0 ? (
-          <div className="text-sm text-neutral-600">아직 댓글이 없습니다.</div>
+          <div className="empty-comments">아직 댓글이 없습니다.</div>
         ) : (
           items.map((c) => {
             const isMine = auth.currentUser?.uid && c.authorUid === auth.currentUser.uid;
 
             return (
-              <div key={c.id} className="text-sm flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <span className="font-medium">{c.authorName}</span>
-                  <span className="text-neutral-500">: </span>
-                  <span className="whitespace-pre-wrap">{c.text}</span>
+              <div key={c.id} className="comment-item">
+                <div className="comment-avatar" aria-hidden="true">
+                  {(c.authorName || "?").trim().slice(0, 1)}
+                </div>
+
+                <div className="comment-body">
+                  <div className="comment-author">{c.authorName || "알 수 없음"}</div>
+                  <div className="comment-text whitespace-pre-wrap">{c.text}</div>
                 </div>
 
                 {isMine && (
-                  <button className="btn" onClick={() => deleteComment(c.id)} type="button">
-                    🗑️ 삭제
+                  <button className="comment-delete" onClick={() => deleteComment(c.id)} type="button">
+                    삭제
                   </button>
                 )}
               </div>
@@ -1277,15 +1315,14 @@ function Comments({ prayerId }: { prayerId: string }) {
         )}
       </div>
 
-      <div className="mt-4 flex gap-2">
-        {/* (3) 칸 안 여백 확대 */}
+      <div className="comment-compose">
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          className="flex-1 input px-4 py-3"
+          className="flex-1 input"
           placeholder="댓글을 입력하세요."
         />
-        <button onClick={addComment} className="btn btn-primary">
+        <button onClick={addComment} className="btn btn-primary comment-submit">
           등록
         </button>
       </div>

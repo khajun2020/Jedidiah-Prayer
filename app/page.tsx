@@ -608,7 +608,13 @@ export default function HomePage() {
         <div className="login-wrap">
           <div className="card login-card">
             <div className="login-brand">
-              <div className="brand-mark" aria-hidden="true">J</div>
+              <div className="brand-mark">
+  		<img
+    		  src="/jedidiah-logo.png"
+    		  alt="여디디야 로고"
+    		  className="brand-logo-image"
+  		/>
+	      </div>
               <div>
                 <div className="eyebrow">JEDIDIAH PRAYER</div>
                 <h1 className="login-title">여디디야 기도제목 나눔</h1>
@@ -694,7 +700,13 @@ export default function HomePage() {
       <header className="app-header">
         <div className="app-header-inner">
           <div className="brand-block">
-            <div className="brand-mark" aria-hidden="true">J</div>
+            <div className="brand-mark">
+  		<img
+    		  src="/jedidiah-logo.png"
+    		  alt="여디디야 로고"
+    		  className="brand-logo-image"
+  		/>
+	    </div>
             <div className="min-w-0">
               <div className="eyebrow">JEDIDIAH PRAYER</div>
               <div className="header-title">여디디야 기도제목 나눔</div>

@@ -1150,7 +1150,7 @@ export default function HomePage() {
 
               <div className="verse-footer">
                 <span className="verse-mark" aria-hidden="true">“</span>
-                <span>너희도 성령 안에서 하나님의 거하실 처소가 되기 위하여 예수 안에서 함께 지어져 가느니라</span>
+                <span>너희도 성령 안에서 하나님이 거하실 처소가 되기 위하여 그리스도 예수 안에서 함께 지어져 가느니라</span>
                 <strong>엡 2:22</strong>
               </div>
             </div>
